@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Juwel Smart Player - 50 Ads Limit</title>
+    <style>
+        :root {
+            --primary: #ff4444;
+            --bg: #0a0a0a;
+            --card-bg: #161616;
+            --text: #e0e0e0;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background: var(--bg); color: var(--text); scroll-behavior: smooth; }
+
+        /* স্টিকি প্লেয়ার */
+        .player-wrapper {
+            display: none;
+            position: sticky;
+            top: 0;
+            background: rgba(10, 10, 10, 0.98);
+            backdrop-filter: blur(10px);
+            z-index: 2000;
+            padding: 10px 0;
+            border-bottom: 2px solid #333;
+        }
+        .main-player {
+            width: 95%; max-width: 800px; aspect-ratio: 16/9;
+            margin: auto; border-radius: 12px; overflow: hidden;
+            background: #000; box-shadow: 0 0 20px rgba(255, 68, 68, 0.3);
+        }
+        iframe { width: 100%; height: 100%; border: none; }
+        
+        /* নিউজ স্টাইল মারকুই */
+        .marquee-container {
+            width: 100%; overflow: hidden; white-space: nowrap;
+            background: #111; padding: 8px 0; margin-top: 5px;
+        }
+        #current-title {
+            display: inline-block; padding-left: 100%;
+            animation: marquee 15s linear infinite;
+            color: var(--primary); font-weight: bold; font-size: 15px;
+        }
+        @keyframes marquee {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(-100%, 0); }
+        }
+
+        /* অ্যাড সেকশন */
+        .ad-container { margin: 5px auto; width: 320px; height: 50px; display: none; overflow: hidden; text-align: center; }
+
+        .container { max-width: 1200px; margin: auto; padding: 15px; }
+
+        /* সার্চ */
+        .search-container { margin: 10px 0 20px 0; text-align: center; }
+        .search-box {
+            width: 100%; max-width: 500px; padding: 12px 20px;
+            border-radius: 30px; border: 1px solid #333;
+            background: #1a1a1a; color: white; outline: none;
+        }
+        #list-status { font-size: 12px; color: #777; margin-top: 8px; }
+
+        /* ভিডিও গ্রিড */
+        .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+        .video-card { background: var(--card-bg); border-radius: 10px; cursor: pointer; border: 1px solid #222; overflow: hidden; transition: 0.3s; }
+        .video-card:hover { border-color: var(--primary); }
+        .video-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; }
+        .video-card p { padding: 10px; font-size: 13px; line-height: 1.4; height: 52px; overflow: hidden; }
+
+        /* লোডার */
+        #loader-wrapper { text-align: center; padding: 100px 20px; }
+        .percent-text { font-size: 28px; color: var(--primary); font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="player-wrapper" id="player-wrapper">
+    <div class="main-player">
+        <iframe id="vid_frame" src="" allow="autoplay; fullscreen"></iframe>
+    </div>
+    
+    <div class="marquee-container">
+        <div id="current-title"></div>
+    </div>
+    
+    <div id="ad-slot" class="ad-container"></div>
+</div>
+
+<div class="container" id="main-content" style="display: none;">
+    <div class="search-container">
+        <input type="text" id="search-input" class="search-box" placeholder="Search videos...">
+        <div id="list-status"></div>
+    </div>
+    <div class="video-grid" id="video-list"></div>
+</div>
+
+<div id="loader-wrapper">
+    <div class="percent-text" id="percent-val">0%</div>
+    <p style="margin-top: 15px; color: #888;">তথ্য যাচাই করা হচ্ছে...</p>
+</div>
+
+<script>
+    const sheetId = '1Sa9dJTYHuLRlJd_WrMceKwqygUw1UyPEsFnFhgJw5X8';
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+
+    let allVideos = [];
+    let currentList = [];
+    let displayedCount = 0;
+    const batchSize = 12;
+
+    // --- অ্যাড হ্যান্ডলিং ফাংশন (৫০ বার লিমিট) ---
+    function handleAds() {
+        const adSlot = document.getElementById('ad-slot');
+        const today = new Date().toDateString();
+        
+        let adStats = JSON.parse(localStorage.getItem('ad_stats_50')) || { date: today, count: 0 };
+
+        // দিন বদলে গেলে কাউন্টার রিসেট
+        if (adStats.date !== today) {
+            adStats = { date: today, count: 0 };
+        }
+
+        if (adStats.count < 50) {
+            adSlot.style.display = 'block';
+            loadAdsterra();
+            adStats.count++;
+            localStorage.setItem('ad_stats_50', JSON.stringify(adStats));
+            console.log("Ad Count: " + adStats.count);
+        } else {
+            adSlot.style.display = 'none';
+            adSlot.innerHTML = "";
+            console.log("Daily limit of 50 reached.");
+        }
+    }
+
+    function loadAdsterra() {
+        const adSlot = document.getElementById('ad-slot');
+        adSlot.innerHTML = ""; 
+        
+        const scriptOptions = document.createElement('script');
+        scriptOptions.type = 'text/javascript';
+        scriptOptions.text = `
+            atOptions = {
+                'key' : '634d3d36c4e0430b751e33f1b314b137',
+                'format' : 'iframe',
+                'height' : 50,
+                'width' : 320,
+                'params' : {}
+            };
+        `;
+        
+        const scriptInvoke = document.createElement('script');
+        scriptInvoke.type = 'text/javascript';
+        scriptInvoke.src = 'https://www.highperformanceformat.com/634d3d36c4e0430b751e33f1b314b137/invoke.js';
+        
+        adSlot.appendChild(scriptOptions);
+        adSlot.appendChild(scriptInvoke);
+    }
+
+    // --- ভিডিও ও ডাটা ফাংশন (অপরিবর্তিত) ---
+    async function checkDataAndLoad() {
+        const lastUpdate = localStorage.getItem('last_update');
+        const today = new Date().toDateString();
+        const storedData = localStorage.getItem('video_data');
+
+        if (storedData && lastUpdate === today) {
+            allVideos = JSON.parse(storedData);
+            showApp();
+        } else {
+            await fetchNewData(today);
+        }
+    }
+
+    async function fetchNewData(today) {
+        const percentVal = document.getElementById('percent-val');
+        try {
+            const response = await fetch(csvUrl);
+            const reader = response.body.getReader();
+            let receivedLength = 0;
+            let chunks = [];
+            while(true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                receivedLength += value.length;
+                percentVal.innerText = Math.min(99, Math.round(receivedLength/500)) + '%';
+            }
+            let blob = new Blob(chunks);
+            let text = await blob.text();
+            const rows = text.split('\n').slice(1);
+            allVideos = rows.map(row => {
+                const cols = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                return { id: cols[0]?.replace(/"/g, '').trim(), title: cols[1]?.replace(/"/g, '').trim() || 'No Title' };
+            }).filter(v => v.id?.length > 5);
+            localStorage.setItem('video_data', JSON.stringify(allVideos));
+            localStorage.setItem('last_update', today);
+            percentVal.innerText = '100%';
+            showApp();
+        } catch (e) { percentVal.innerText = "Error!"; }
+    }
+
+    function showApp() {
+        document.getElementById('loader-wrapper').style.display = 'none';
+        document.getElementById('main-content').style.display = 'block';
+        shuffleAndRender();
+    }
+
+    function createCard(video) {
+        const div = document.createElement('div');
+        div.className = 'video-card';
+        div.onclick = () => playAndShuffle(video);
+        div.innerHTML = `<img src="https://img.youtube.com/vi/${video.id}/mqdefault.jpg"><p>${video.title}</p>`;
+        return div;
+    }
+
+    function shuffleAndRender() {
+        allVideos.sort(() => Math.random() - 0.5);
+        currentList = [...allVideos];
+        document.getElementById('video-list').innerHTML = '';
+        displayedCount = 0;
+        document.getElementById('list-status').innerText = `Total Videos: ${allVideos.length}`;
+        renderBatch();
+    }
+
+    function playAndShuffle(video) {
+        document.getElementById('player-wrapper').style.display = 'block';
+        document.getElementById('vid_frame').src = `https://www.youtube.com/embed/${video.id}?autoplay=1`;
+        
+        const titleEl = document.getElementById('current-title');
+        titleEl.style.animation = 'none';
+        titleEl.offsetHeight;
+        titleEl.style.animation = null;
+        titleEl.innerText = "NOW PLAYING: " + video.title + " • " + video.title;
+        
+        window.scrollTo({top: 0, behavior: 'smooth'});
+        shuffleAndRender();
+        
+        // নতুন ভিডিও প্লে করলেই অ্যাড লোড হবে (সীমা ৫০ পর্যন্ত)
+        handleAds(); 
+    }
+
+    function renderBatch() {
+        const container = document.getElementById('video-list');
+        const nextBatch = currentList.slice(displayedCount, displayedCount + batchSize);
+        nextBatch.forEach(v => container.appendChild(createCard(v)));
+        displayedCount += batchSize;
+    }
+
+    document.getElementById('search-input').addEventListener('input', (e) => {
+        const q = e.target.value.toLowerCase();
+        if(q.trim() === "") { shuffleAndRender(); return; }
+        currentList = allVideos.filter(v => v.title.toLowerCase().includes(q));
+        document.getElementById('video-list').innerHTML = '';
+        displayedCount = 0;
+        document.getElementById('list-status').innerText = `Found: ${currentList.length}`;
+        renderBatch();
+    });
+
+    window.onscroll = () => {
+        if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 500) {
+            if (displayedCount < currentList.length) renderBatch();
+        }
+    };
+
+    window.onload = checkDataAndLoad;
+</script>
+
+</body>
+</html>
